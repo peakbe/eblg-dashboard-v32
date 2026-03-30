@@ -11,66 +11,6 @@ const ENDPOINTS = {
     notam: `${PROXY}/notam`
 };
 
-// ======================================================
-// FETCH HELPER (centralisé, robuste, réutilisable)
-// ======================================================
-
-async function fetchJSON(url) {
-    try {
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return await res.json();
-    } catch (err) {
-        console.error("Erreur fetch :", err);
-        return { fallback: true, error: err.message };
-    }
-}
-
-// ======================================================
-// METAR
-// ======================================================
-
-async function loadMetar() {
-    const data = await fetchJSON(ENDPOINTS.metar);
-    updateMetarUI(data);
-    updateStatusPanel("METAR", data);
-}
-
-
-function updateMetarUI(data) {
-    const el = document.getElementById("metar");
-    if (!el) return;
-
-    if (data.fallback) {
-        el.innerText = "METAR indisponible (fallback activé)";
-        updateSonometers("UNKNOWN");
-        return;
-    }
-
-    el.innerText = data.raw;
-
-    const windDir = data.wind_direction?.value;
-    const runway = getRunwayFromWind(windDir);
-
-    updateSonometers(runway);
-}
-function updateSonometers(runway) {
-    const color = getSonometerColor(runway);
-
-    Object.values(sonometers).forEach(s => {
-        s.marker.setStyle({
-            color,
-            fillColor: color
-        });
-        s.status = runway;
-    });
-}
-
-
-/* ----------------------------------------------------------
-   SONOMÈTRES EBLG
----------------------------------------------------------- */
-
 const SONOS = [
   { id:"F017", lat:50.764883, lon:5.630606 },
   { id:"F001", lat:50.737, lon:5.608833 },
@@ -92,130 +32,26 @@ const SONOS = [
 ];
 
 let sonometers = {}; // {id, lat, lon, marker, status}
-
-function getRunwayFromWind(windDir) {
-    if (!windDir) return "UNKNOWN";
-
-    // Piste 22 = vent venant de 240–300°
-    if (windDir >= 240 && windDir <= 300) return "25";
-
-    // Piste 04 = vent venant de 060–120°
-    if (windDir >= 60 && windDir <= 120) return "07";
-
-    return "UNKNOWN";
-}
-function getSonometerColor(runway) {
-    if (runway === "22") return "red";
-    if (runway === "04") return "blue";
-    return "gray";
-}
-
-/* ----------------------------------------------------------
-   MAP LEAFLET
----------------------------------------------------------- */
-
-let map;
-let runwayLayer;
-let sonometerLayer;
-
-function initMap() {
-  map = L.map("map", {
-    center: MAP_CENTER,
-    zoom: MAP_ZOOM,
-    preferCanvas: true
-  });
-
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: "&copy; OpenStreetMap"
-  }).addTo(map);
-
-  runwayLayer = L.layerGroup().addTo(map);
-  sonometerLayer = L.layerGroup().addTo(map);
-
-  initSonometers();
-}
-
-function initSonometers(map) {
-    SONOS.forEach(s => {
-        const marker = L.circleMarker([s.lat, s.lon], {
-            radius: 6,
-            color: "gray",
-            fillColor: "gray",
-            fillOpacity: 0.9
-        }).addTo(map);
-
-        sonometers[s.id] = {
-            ...s,
-            marker,
-            status: "UNKNOWN"
-        };
-    });
-}
-
+let map;             // carte Leaflet
 
 // ======================================================
-// TAF (prêt pour intégration future)
+// FETCH HELPER
 // ======================================================
 
-async function loadTaf() {
-    const data = await fetchJSON(ENDPOINTS.taf);
-    updateTafUI(data);
-}
-
-function updateTafUI(data) {
-    const el = document.getElementById("taf");
-    if (!el) return;
-
-    if (data.fallback) {
-        el.innerText = "TAF indisponible (fallback activé)";
-        return;
-    }
-
-    el.innerText = data.raw || "TAF disponible";
-}
-
-/* ----------------------------------------------------------
-   FIDS AVEC FALLBACK ROBUSTE
----------------------------------------------------------- */
-app.get("/fids", async (req, res) => {
-  try {
-    // Exemple de source FIDS (à remplacer plus tard)
-    const url = "https://opensky-network.org/api/flights/departure?airport=EBLG&begin=0&end=0";
-
-    let response;
+async function fetchJSON(url) {
     try {
-      response = await fetch(url);
-    } catch (networkError) {
-      console.error("Erreur réseau FIDS :", networkError);
-      throw new Error("NETWORK_FAIL");
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return await res.json();
+    } catch (err) {
+        console.error("Erreur fetch :", err);
+        return { fallback: true, error: err.message };
     }
+}
 
-    if (!response.ok) throw new Error("HTTP_FAIL");
-
-    const data = await response.json();
-    return res.json(data);
-
-  } catch (error) {
-    console.error("FIDS DOWN → fallback activé :", error.message);
-
-    return res.json([
-      {
-        flight: "N/A",
-        destination: "N/A",
-        time: "N/A",
-        status: "Unavailable",
-        fallback: true,
-        timestamp: new Date().toISOString()
-      }
-    ]);
-  }
-});
-
-
-// =========================
+// ======================================================
 // PANEL D'ÉTAT GLOBAL
-// =========================
+// ======================================================
 
 function updateStatusPanel(service, data) {
     const panel = document.getElementById("status-panel");
@@ -238,12 +74,163 @@ function updateStatusPanel(service, data) {
 }
 
 // ======================================================
-// INITIALISATION
+// METAR
+// ======================================================
+
+async function loadMetar() {
+    const data = await fetchJSON(ENDPOINTS.metar);
+    updateMetarUI(data);
+    updateStatusPanel("METAR", data);
+}
+
+function updateMetarUI(data) {
+    const el = document.getElementById("metar");
+    if (!el) return;
+
+    if (data.fallback) {
+        el.innerText = "METAR indisponible (fallback activé)";
+        updateSonometers("UNKNOWN");
+        return;
+    }
+
+    el.innerText = data.raw;
+
+    const windDir = data.wind_direction?.value;
+    const runway = getRunwayFromWind(windDir);
+    updateSonometers(runway);
+}
+
+function getRunwayFromWind(windDir) {
+    if (!windDir && windDir !== 0) return "UNKNOWN";
+
+    if (windDir >= 240 && windDir <= 300) return "25";
+    if (windDir >= 60 && windDir <= 120) return "07";
+
+    return "UNKNOWN";
+}
+
+function getSonometerColor(runway) {
+    if (runway === "25") return "red";
+    if (runway === "07") return "blue";
+    return "gray";
+}
+
+function updateSonometers(runway) {
+    const color = getSonometerColor(runway);
+
+    Object.values(sonometers).forEach(s => {
+        s.marker.setStyle({
+            color,
+            fillColor: color
+        });
+        s.status = runway;
+    });
+}
+
+// ======================================================
+// TAF
+// ======================================================
+
+async function loadTaf() {
+    const data = await fetchJSON(ENDPOINTS.taf);
+    updateTafUI(data);
+}
+
+function updateTafUI(data) {
+    const el = document.getElementById("taf");
+    if (!el) return;
+
+    if (data.fallback) {
+        el.innerText = "TAF indisponible (fallback activé)";
+        return;
+    }
+
+    el.innerText = data.raw || "TAF disponible";
+}
+
+// ======================================================
+// FIDS (UI compacte + colorée)
+// ======================================================
+
+async function loadFids() {
+    const data = await fetchJSON(ENDPOINTS.fids);
+    updateFidsUI(data);
+}
+
+function updateFidsUI(data) {
+    const container = document.getElementById("fids");
+    if (!container) return;
+
+    if (data.fallback) {
+        container.innerHTML = `<div class="fids-row fids-unknown">FIDS indisponible</div>`;
+        return;
+    }
+
+    container.innerHTML = "";
+
+    data.forEach(flight => {
+        const status = (flight.status || "").toLowerCase();
+
+        let cssClass = "fids-unknown";
+        if (status.includes("on time")) cssClass = "fids-on-time";
+        if (status.includes("delayed")) cssClass = "fids-delayed";
+        if (status.includes("cancel")) cssClass = "fids-cancelled";
+        if (status.includes("board")) cssClass = "fids-boarding";
+
+        const row = document.createElement("div");
+        row.className = `fids-row ${cssClass}`;
+        row.innerHTML = `
+            <span>${flight.flight}</span>
+            <span>${flight.destination}</span>
+            <span>${flight.time}</span>
+            <span>${flight.status}</span>
+        `;
+        container.appendChild(row);
+    });
+}
+
+// ======================================================
+// SONOMÈTRES (PLACEMENT SUR LA CARTE)
+// ======================================================
+
+function initSonometers(mapInstance) {
+    SONOS.forEach(s => {
+        const marker = L.circleMarker([s.lat, s.lon], {
+            radius: 6,
+            color: "gray",
+            fillColor: "gray",
+            fillOpacity: 0.9
+        }).addTo(mapInstance);
+
+        sonometers[s.id] = {
+            ...s,
+            marker,
+            status: "UNKNOWN"
+        };
+    });
+}
+
+// ======================================================
+// CARTE (ADAPTE SI TU AS DÉJÀ TA PROPRE INIT)
+// ======================================================
+
+function initMap() {
+    map = L.map("map").setView([50.643, 5.443], 11);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 18
+    }).addTo(map);
+
+    initSonometers(map);
+}
+
+// ======================================================
+// INITIALISATION GLOBALE
 // ======================================================
 
 window.onload = () => {
+    initMap();      // si tu as déjà une carte, remplace par ton init et appelle initSonometers(map) dedans
     loadMetar();
     loadTaf();
     loadFids();
-    // Tu pourras ajouter ici : loadNotam(), loadCorridors(), loadPistes(), etc.
 };
